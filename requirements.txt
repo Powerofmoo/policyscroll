@@ -1,4 +1,3 @@
 chromadb
-pydantic
 ibm_watsonx_ai
 sentence_transformers
