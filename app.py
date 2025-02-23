@@ -16,6 +16,8 @@ IBM_URL_CHAT = "https://us-south.ml.cloud.ibm.com/ml/v1/text/chat?version=2023-1
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "user_input" not in st.session_state:
+    st.session_state.user_input = ""
 
 ##############################################
 ##
@@ -208,23 +210,36 @@ def proximity_search( question ):
     return "\n".join(documents)
 
 # Streamlit UI
-st.title("🔍 Policy Maker")
+st.title("🔍 Policy Scroll")
+st.subheader("AI-Powered Project Matching")
+st.write("Explore the Lab Lab Library to find relevant past projects that align with your policy or new initiative.")
 
+# Suggested search queries as buttons
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("Solarpunk projects to connect with"):
+        st.session_state["user_input"] = "Solarpunk projects to connect with"
+
+with col2:
+    if st.button("How to implement DEI?"):
+        st.session_state["user_input"] = "How to implement DEI?"
+        
 # User input in Streamlit
-user_input = st.chat_input("Type your message...")
+user_input = st.chat_input("Describe your policy or project to find relevant Lab Lab projects...")
 
-if user_input:
+if st.session_state["user_input"]:
 
     # Display user message
-    st.chat_message("user").markdown(user_input)
+    #st.chat_message("user").markdown(st.session_state["user_input"])
 
-    grounding = proximity_search(user_input)
+    grounding = proximity_search(st.session_state["user_input"])
 
     # add the submissions as context (only in prompt, not in history)
-    prompt = user_input + ". If a project is mentioned, share the image. The context for the question: " + grounding;
+    prompt = st.session_state["user_input"] + ". If a project is mentioned, share the image. The context for the question: " + grounding;
     messages = st.session_state.messages.copy()
     messages.append({"role": "user", "content": prompt})
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.messages.append({"role": "user", "content": st.session_state["user_input"]})
 
     # Get response from IBM
     with st.spinner("Thinking..."):
