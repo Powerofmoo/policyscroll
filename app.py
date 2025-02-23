@@ -1,7 +1,6 @@
 import os
 import getpass
 import requests
-
 import sentence_transformers
 
 import streamlit as st
@@ -9,7 +8,6 @@ import streamlit as st
 VECTOR_DB ="bbf2ef09-875b-4737-a793-499409a108b0"
 
 IBM_API_KEY = os.getenv("IBM_API_KEY")
-IBM_PROJECT_ID = "a0659778-f4ce-4da1-ba01-43b4f43a026f"
 
 IBM_URL_TOKEN = "https://iam.cloud.ibm.com/identity/token"
 IBM_URL_CHAT = "https://us-south.ml.cloud.ibm.com/ml/v1/text/chat?version=2023-10-25"
@@ -18,6 +16,9 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "user_input" not in st.session_state:
     st.session_state.user_input = ""
+
+# Load the banner image from the same directory
+st.image("banner_policy.jpg", use_container_width=True)
 
 ##############################################
 ##
@@ -44,11 +45,11 @@ def IBM_token():
 def IBM_chat (messages):
     body = {
         "model_id": "ibm/granite-3-8b-instruct",
-        "project_id": IBM_PROJECT_ID,
+        "project_id": os.getenv("IBM_PROJECT_ID"),
         "messages": messages,
         "max_tokens": 10000,
         "temperature": 0.3,
-        "time_limit": 10000
+        "time_limit": 20000
     }
     headers = {
     	"Accept": "application/json",
@@ -67,47 +68,26 @@ def IBM_chat (messages):
     response = response.json()
     return response["choices"][0]["message"]["content"]
 
-## get token
-IBM_token()
-
 def get_credentials():
 	return {
 		"url" : "https://us-south.ml.cloud.ibm.com",
 		"apikey" : os.getenv("IBM_API_KEY")
 	}
 
-model_id = "ibm/granite-3-8b-instruct"
-
-parameters = {
-    "decoding_method": "greedy",
-    "max_new_tokens": 900,
-    "min_new_tokens": 0,
-    "repetition_penalty": 1
-}
-
-project_id = os.getenv("IBM_PROJECT_ID")
-space_id = os.getenv("IBM_SPACE_ID")
-
-from ibm_watsonx_ai.foundation_models import ModelInference
-
-model = ModelInference(
-	model_id = model_id,
-	params = parameters,
-	credentials = get_credentials(),
-	project_id = project_id,
-	space_id = space_id
-	)
-
 from ibm_watsonx_ai.client import APIClient
+from ibm_watsonx_ai.foundation_models.embeddings.sentence_transformer_embeddings import SentenceTransformerEmbeddings
 
-wml_credentials = get_credentials()
-client = APIClient(credentials=wml_credentials, project_id=project_id)  #, space_id=space_id)
+if "client" not in st.session_state:
+    with st.spinner("⏳ Waking the wizard ..."):
+        IBM_token()
+        wml_credentials = get_credentials()
+        st.session_state.client = APIClient(credentials=wml_credentials, project_id=os.getenv("IBM_PROJECT_ID")) 
+        vector_index_details = st.session_state.client.data_assets.get_details(VECTOR_DB)
+        st.session_state.vector_index_properties = vector_index_details["entity"]["vector_index"]
 
-vector_index_id = VECTOR_DB
-vector_index_details = client.data_assets.get_details(vector_index_id)
-vector_index_properties = vector_index_details["entity"]["vector_index"]
-
-top_n = 20 if vector_index_properties["settings"].get("rerank") else int(vector_index_properties["settings"]["top_k"])
+        st.session_state.top_n = 20 if st.session_state.vector_index_properties["settings"].get("rerank") else int(st.session_state.vector_index_properties["settings"]["top_k"])
+        st.session_state.emb = SentenceTransformerEmbeddings('sentence-transformers/all-MiniLM-L6-v2')
+        
 
 def rerank( client, documents, query, top_n ):
     from ibm_watsonx_ai.foundation_models import Rerank
@@ -133,9 +113,6 @@ def rerank( client, documents, query, top_n ):
         
     return new_documents
 
-from ibm_watsonx_ai.foundation_models.embeddings.sentence_transformer_embeddings import SentenceTransformerEmbeddings
-
-emb = SentenceTransformerEmbeddings('sentence-transformers/all-MiniLM-L6-v2')
 
 import subprocess
 import gzip
@@ -145,13 +122,11 @@ import random
 import string
 
 def hydrate_chromadb():
-    data = client.data_assets.get_content(vector_index_id)
+    data = st.session_state.client.data_assets.get_content(VECTOR_DB)
     content = gzip.decompress(data)
     stringified_vectors = str(content, "utf-8")
     vectors = json.loads(stringified_vectors)
     
-    #chroma_client = chromadb.Client()
-    #chroma_client = chromadb.InMemoryClient()
     chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
     # make sure collection is empty if it already existed
@@ -192,26 +167,28 @@ def hydrate_chromadb():
     )
     return collection
 
-chroma_collection = hydrate_chromadb()
+if "chroma_collection" not in st.session_state:
+    with st.spinner("⏳ Dusting off the scroll books ..."):
+        st.session_state.chroma_collection = hydrate_chromadb()
 
 def proximity_search( question ):
-    query_vectors = emb.embed_query(question)
-    query_result = chroma_collection.query(
+    query_vectors = st.session_state.emb.embed_query(question)
+    query_result = st.session_state.chroma_collection.query(
         query_embeddings=query_vectors,
-        n_results=top_n,
+        n_results=st.session_state.top_n,
         include=["documents", "metadatas", "distances"]
     )
 
     documents = list(reversed(query_result["documents"][0]))
 
-    if vector_index_properties["settings"].get("rerank"):
-        documents = rerank(client, documents, question, vector_index_properties["settings"]["top_k"])
+    if st.session_state.vector_index_properties["settings"].get("rerank"):
+        documents = rerank(st.session_state.client, documents, question, st.session_state.vector_index_properties["settings"]["top_k"])
 
     return "\n".join(documents)
 
 # Streamlit UI
-st.title("🔍 Policy Scroll")
-st.subheader("AI-Powered Project Matching")
+st.title("🔍 Synergy Scroll")
+st.subheader("AI-Powered Project & Policy Matching")
 st.write("Explore the Lab Lab Library to find relevant past projects that align with your policy or new initiative.")
 
 # Suggested search queries as buttons
@@ -226,7 +203,7 @@ with col2:
         st.session_state["user_input"] = "How to implement DEI?"
         
 # User input in Streamlit
-user_input = st.chat_input("Describe your policy or project to find relevant Lab Lab projects...")
+user_input = st.text_input("Describe your policy or project to find relevant Lab Lab projects...")
 
 if st.session_state["user_input"]:
 
@@ -236,7 +213,7 @@ if st.session_state["user_input"]:
     grounding = proximity_search(st.session_state["user_input"])
 
     # add the submissions as context (only in prompt, not in history)
-    prompt = st.session_state["user_input"] + ". If a project is mentioned, share the image. The context for the question: " + grounding;
+    prompt = st.session_state["user_input"] + ". For a project share the image as markdown and mention the url as well. The context for the question: " + grounding;
     messages = st.session_state.messages.copy()
     messages.append({"role": "user", "content": prompt})
     st.session_state.messages.append({"role": "user", "content": st.session_state["user_input"]})
